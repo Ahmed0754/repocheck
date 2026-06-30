@@ -127,7 +127,7 @@ class GitHubClient:
     def branch_protection(self, ref: RepoRef, branch: str = "main") -> Optional[dict[str, Any]]:
         try:
             return self._get(f"/repos/{ref.full_name}/branches/{branch}/protection").json()
-        except GitHubError:
+        except (GitHubError, requests.exceptions.HTTPError):
             return None
 
     def org_repos(self, org: str, per_page: int = 100) -> list[dict[str, Any]]:
