@@ -282,6 +282,112 @@ def check_issue_hygiene(client: GitHubClient, ref: RepoRef) -> CheckResult:
     return _result("Issue Hygiene", score, details)
 
 
+def check_security(client: GitHubClient, ref: RepoRef) -> CheckResult:
+    root_files = client.root_files(ref)
+    github_contents = client.contents(ref, ".github") or []
+    github_names = [item["name"].lower() for item in github_contents if isinstance(github_contents, list)]
+
+    details = []
+    score = 0
+
+    has_security_md = any(f.lower() == "security.md" for f in root_files)
+    if has_security_md:
+        score += 40
+        details.append("SECURITY.md present — vulnerability disclosure policy defined.")
+    else:
+        details.append("No SECURITY.md — add one to define how to report vulnerabilities.")
+
+    has_dependabot = "dependabot.yml" in github_names or "dependabot.yaml" in github_names
+    if has_dependabot:
+        score += 35
+        details.append("dependabot.yml configured — automated dependency updates enabled.")
+    else:
+        details.append("No dependabot.yml — consider adding automated dependency updates.")
+
+    has_codeowners = "codeowners" in [f.lower() for f in root_files] or "codeowners" in github_names
+    if has_codeowners:
+        score += 25
+        details.append("CODEOWNERS file found — code review ownership defined.")
+    else:
+        details.append("No CODEOWNERS file.")
+
+    return _result("Security", score, details)
+
+
+def check_contributing(client: GitHubClient, ref: RepoRef) -> CheckResult:
+    files = client.root_files(ref)
+    contrib_file = next((f for f in files if f.lower().startswith("contributing")), None)
+
+    if not contrib_file:
+        return _result("Contributing Guide", 0, ["No CONTRIBUTING.md — makes it harder for others to contribute."], weight=0.75)
+
+    text = client.file_text(ref, contrib_file) or ""
+    details = [f"CONTRIBUTING.md found ({len(text)} chars)."]
+    score = 70
+    if len(text) > 500:
+        score += 30
+        details.append("Substantive contribution guide (>500 chars).")
+    else:
+        details.append("Short contribution guide — consider expanding.")
+
+    return _result("Contributing Guide", score, details, weight=0.75)
+
+
+def check_docker(client: GitHubClient, ref: RepoRef) -> CheckResult:
+    files = [f.lower() for f in client.root_files(ref)]
+    details = []
+    score = 0
+
+    if "dockerfile" in files:
+        score += 60
+        details.append("Dockerfile found.")
+
+    if "docker-compose.yml" in files or "docker-compose.yaml" in files:
+        score += 40
+        details.append("docker-compose.yml found.")
+
+    deploy_hints = ["railway.json", "heroku.yml", "render.yaml", "fly.toml", "vercel.json", "netlify.toml"]
+    found_deploy = [f for f in deploy_hints if f in files]
+    if found_deploy:
+        score = max(score, 50)
+        details.append(f"Deployment config found: {', '.join(found_deploy)}.")
+
+    if score == 0:
+        details.append("No Docker or deployment configuration found.")
+
+    return _result("Docker/Deploy", score, details, weight=0.5)
+
+
+def check_branch_protection(client: GitHubClient, ref: RepoRef) -> CheckResult:
+    protection = client.branch_protection(ref, "main") or client.branch_protection(ref, "master")
+
+    if protection is None:
+        return _result("Branch Protection", 0, ["No branch protection on main/master — anyone can push directly."], weight=0.75)
+
+    details = []
+    score = 40
+
+    required_reviews = protection.get("required_pull_request_reviews")
+    if required_reviews:
+        count = required_reviews.get("required_approving_review_count", 1)
+        score += 30
+        details.append(f"PR reviews required ({count} approver(s)).")
+    else:
+        details.append("No required PR reviews.")
+
+    if protection.get("required_status_checks"):
+        score += 20
+        details.append("Required status checks configured.")
+    else:
+        details.append("No required status checks.")
+
+    if protection.get("enforce_admins", {}).get("enabled"):
+        score += 10
+        details.append("Protection enforced for admins too.")
+
+    return _result("Branch Protection", score, details, weight=0.75)
+
+
 CHECKS: list[Callable[[GitHubClient, RepoRef], CheckResult]] = [
     check_readme,
     check_ci,
@@ -290,4 +396,8 @@ CHECKS: list[Callable[[GitHubClient, RepoRef], CheckResult]] = [
     check_license,
     check_activity,
     check_issue_hygiene,
+    check_security,
+    check_contributing,
+    check_docker,
+    check_branch_protection,
 ]

@@ -74,7 +74,7 @@ def test_end_to_end_report_with_mocked_api():
     assert report.repo.full_name == "acme/widget"
     assert 0 <= report.overall_score <= 100
     assert report.overall_grade in ("A", "B", "C", "D", "F")
-    assert len(report.checks) == 7
+    assert len(report.checks) == 11
 
     as_dict = report.to_dict()
     # Confirm it's JSON-serializable end to end, like --json mode produces

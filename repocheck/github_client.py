@@ -123,3 +123,18 @@ class GitHubClient:
         if not isinstance(data, list):
             return []
         return [item["name"] for item in data if item["type"] == "dir"]
+
+    def branch_protection(self, ref: RepoRef, branch: str = "main") -> Optional[dict[str, Any]]:
+        try:
+            return self._get(f"/repos/{ref.full_name}/branches/{branch}/protection").json()
+        except GitHubError:
+            return None
+
+    def org_repos(self, org: str, per_page: int = 100) -> list[dict[str, Any]]:
+        try:
+            return self._get(
+                f"/orgs/{org}/repos",
+                params={"per_page": per_page, "type": "public", "sort": "updated"},
+            ).json()
+        except GitHubError:
+            return []
