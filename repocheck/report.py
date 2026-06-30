@@ -7,43 +7,11 @@ from .checks import CHECKS, CheckResult
 from .github_client import GitHubClient, RepoRef
 
 
-FIX_HINTS: dict[str, list[str]] = {
-    "README Quality": [
-        "Expand your README to at least 300 characters.",
-        "Add an ## Installation section with pip/npm install instructions.",
-        "Add a ## Usage section with a code example.",
-        "Add a PyPI/CI badge using shields.io.",
-    ],
-    "CI/CD": [
-        "Create .github/workflows/ci.yml to run your tests on every push.",
-    ],
-    "Test Presence": [
-        "Create a tests/ directory with at least one test file.",
-        "Add a pytest.ini file at the repo root.",
-    ],
-    "Dependency Hygiene": [
-        "Pin all versions in requirements.txt using == instead of >=.",
-        "Add a lockfile (package-lock.json / yarn.lock) if using Node.",
-    ],
-    "License": [
-        "Add a LICENSE file (MIT is a common permissive choice).",
-    ],
-    "Security": [
-        "Add a SECURITY.md explaining how to report vulnerabilities.",
-        "Add .github/dependabot.yml to automate dependency updates.",
-    ],
-    "Contributing Guide": [
-        "Add a CONTRIBUTING.md with steps for running locally and opening PRs.",
-    ],
-    "Docker/Deploy": [
-        "Add a Dockerfile if your project is a deployable app.",
-        "Add a docker-compose.yml for local dev environment setup.",
-    ],
-    "Branch Protection": [
-        "Enable branch protection on main: require PR reviews before merging.",
-        "Add required status checks so CI must pass before merging.",
-    ],
-}
+_FIX_SIGNALS = ("No ", "consider", "appears inactive", "low-effort", "Short ")
+
+
+def _is_actionable(detail: str) -> bool:
+    return any(signal in detail for signal in _FIX_SIGNALS)
 
 
 @dataclass
@@ -100,7 +68,7 @@ class Report:
         for c in sorted(self.checks, key=lambda x: x.score):
             if c.score >= 90:
                 continue
-            hints = FIX_HINTS.get(c.name, [])
+            hints = [d for d in c.details if _is_actionable(d)]
             if hints:
                 suggestions.append((c.name, hints))
         return suggestions
