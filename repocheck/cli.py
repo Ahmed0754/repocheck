@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 
 import click
 from rich.console import Console
@@ -201,9 +202,10 @@ def _render_org(results: list[tuple[RepoRef, int, str]]) -> None:
 @click.option("--fix", "show_fix", is_flag=True, help="Print a checklist of improvements.")
 @click.option("--md", "as_markdown", is_flag=True, help="Output a markdown report.")
 @click.option("--history", "show_history", is_flag=True, help="Show score trend from past runs.")
+@click.option("--watch", type=int, default=None, metavar="SECONDS", help="Re-scan every N seconds until Ctrl+C.")
 @click.option("--limit", type=int, default=20, show_default=True, help="Max repos to scan with --org.")
 @click.version_option()
-def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_markdown, show_history, limit):
+def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_markdown, show_history, watch, limit):
     """Scan a GitHub REPO (owner/repo or URL) and print a health report card.
 
     \b
@@ -274,21 +276,34 @@ def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_ma
             sys.exit(1)
         return
 
-    last_run = get_last_run(ref.full_name)
-    save_run(ref.full_name, report.overall_score, [{"name": c.name, "score": c.score} for c in report.checks])
+    try:
+        while True:
+            last_run = get_last_run(ref.full_name)
+            save_run(ref.full_name, report.overall_score, [{"name": c.name, "score": c.score} for c in report.checks])
 
-    if as_json:
-        print(json.dumps(report.to_dict(), indent=2))
-    elif as_markdown:
-        print(report.to_markdown())
-    else:
-        _render(report, verbose=verbose, last_run=last_run)
-        if show_fix:
-            _render_fix(report)
+            if as_json:
+                print(json.dumps(report.to_dict(), indent=2))
+            elif as_markdown:
+                print(report.to_markdown())
+            else:
+                _render(report, verbose=verbose, last_run=last_run)
+                if show_fix:
+                    _render_fix(report)
 
-    if min_score is not None and report.overall_score < min_score:
-        console.print(f"\n[red bold]Score {report.overall_score} is below --min-score {min_score}. Exiting with code 1.[/red bold]")
-        sys.exit(1)
+            if min_score is not None and report.overall_score < min_score:
+                console.print(f"\n[red bold]Score {report.overall_score} is below --min-score {min_score}. Exiting with code 1.[/red bold]")
+                sys.exit(1)
+
+            if not watch:
+                break
+
+            console.print(f"\n[dim]Refreshing in {watch}s... Ctrl+C to stop.[/dim]")
+            time.sleep(watch)
+            console.clear()
+            with console.status(f"[bold blue]Scanning {ref.full_name}..."):
+                report = run_report(client, ref)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Watch stopped.[/dim]")
 
 
 if __name__ == "__main__":
