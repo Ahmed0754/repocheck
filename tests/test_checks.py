@@ -5,11 +5,15 @@ import pytest
 
 from repocheck.checks import (
     check_activity,
+    check_branch_protection,
     check_ci,
+    check_contributing,
     check_dependencies,
+    check_docker,
     check_issue_hygiene,
     check_license,
     check_readme,
+    check_security,
     check_tests,
 )
 from repocheck.github_client import RepoRef
@@ -27,6 +31,8 @@ def make_client(**overrides):
     client.commits.return_value = overrides.get("commits", [])
     client.issues.return_value = overrides.get("issues", [])
     client.repo.return_value = overrides.get("repo", {})
+    client.contents.return_value = overrides.get("contents", [])
+    client.branch_protection.return_value = overrides.get("branch_protection", None)
     return client
 
 
@@ -202,3 +208,122 @@ def test_issue_hygiene_all_stale():
     client = make_client(repo={"open_issues_count": 5}, issues=issues)
     result = check_issue_hygiene(client, REF)
     assert result.score == 20
+
+
+# ---------------------------------------------------------------------------
+# Security
+# ---------------------------------------------------------------------------
+
+def test_security_all_present():
+    client = make_client(
+        root_files=["SECURITY.md", "CODEOWNERS"],
+        contents=[{"name": "dependabot.yml"}, {"name": "workflows", "type": "dir"}],
+    )
+    result = check_security(client, REF)
+    assert result.score == 100
+
+
+def test_security_nothing():
+    client = make_client(root_files=[], contents=[])
+    result = check_security(client, REF)
+    assert result.score == 0
+    assert result.grade == "F"
+
+
+def test_security_md_only():
+    client = make_client(root_files=["SECURITY.md"], contents=[])
+    result = check_security(client, REF)
+    assert result.score == 40
+
+
+def test_security_dependabot_only():
+    client = make_client(root_files=[], contents=[{"name": "dependabot.yml"}])
+    result = check_security(client, REF)
+    assert result.score == 35
+
+
+# ---------------------------------------------------------------------------
+# Contributing
+# ---------------------------------------------------------------------------
+
+def test_contributing_missing():
+    client = make_client(root_files=[])
+    result = check_contributing(client, REF)
+    assert result.score == 0
+    assert result.grade == "F"
+
+
+def test_contributing_short():
+    client = make_client(root_files=["CONTRIBUTING.md"], file_text="Short guide.")
+    result = check_contributing(client, REF)
+    assert result.score == 70
+
+
+def test_contributing_full():
+    long_text = "How to contribute.\n\n" + ("x" * 600)
+    client = make_client(root_files=["CONTRIBUTING.md"], file_text=long_text)
+    result = check_contributing(client, REF)
+    assert result.score == 100
+
+
+# ---------------------------------------------------------------------------
+# Docker / Deploy
+# ---------------------------------------------------------------------------
+
+def test_docker_nothing():
+    client = make_client(root_files=["README.md"])
+    result = check_docker(client, REF)
+    assert result.score == 0
+
+
+def test_docker_dockerfile_only():
+    client = make_client(root_files=["Dockerfile"])
+    result = check_docker(client, REF)
+    assert result.score == 60
+
+
+def test_docker_both():
+    client = make_client(root_files=["Dockerfile", "docker-compose.yml"])
+    result = check_docker(client, REF)
+    assert result.score == 100
+
+
+def test_docker_deploy_config():
+    client = make_client(root_files=["fly.toml"])
+    result = check_docker(client, REF)
+    assert result.score == 50
+
+
+# ---------------------------------------------------------------------------
+# Branch Protection
+# ---------------------------------------------------------------------------
+
+def test_branch_protection_none():
+    client = make_client(branch_protection=None)
+    result = check_branch_protection(client, REF)
+    assert result.score == 0
+    assert result.grade == "F"
+
+
+def test_branch_protection_basic():
+    client = make_client(branch_protection={})
+    result = check_branch_protection(client, REF)
+    assert result.score == 40
+
+
+def test_branch_protection_with_reviews():
+    protection = {"required_pull_request_reviews": {"required_approving_review_count": 1}}
+    client = make_client(branch_protection=protection)
+    result = check_branch_protection(client, REF)
+    assert result.score == 70
+
+
+def test_branch_protection_full():
+    protection = {
+        "required_pull_request_reviews": {"required_approving_review_count": 2},
+        "required_status_checks": {"strict": True, "contexts": ["ci"]},
+        "enforce_admins": {"enabled": True},
+    }
+    client = make_client(branch_protection=protection)
+    result = check_branch_protection(client, REF)
+    assert result.score == 100

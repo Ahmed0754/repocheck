@@ -12,7 +12,7 @@ from rich.table import Table
 from rich.text import Text
 
 from .github_client import GitHubClient, GitHubError, RepoRef, parse_repo_arg
-from .history import get_last_run, save_run
+from .history import get_history, get_last_run, save_run
 from .report import run_report
 
 console = Console()
@@ -132,6 +132,34 @@ def _render_compare(report_a, report_b) -> None:
     console.print(table)
 
 
+def _render_history(repo: str) -> None:
+    runs = get_history(repo)
+    if not runs:
+        console.print(f"[dim]No history found for {repo}. Run a scan first.[/dim]")
+        return
+
+    table = Table(show_header=True, header_style="bold", title=f"Score history: {repo}")
+    table.add_column("Date")
+    table.add_column("Score", justify="right")
+    table.add_column("Grade", justify="center")
+    table.add_column("Change", justify="right")
+
+    for i, run in enumerate(runs):
+        ts = run["timestamp"][:16].replace("T", " ")
+        score = run["score"]
+        grade = next((g for threshold, g in [(90,"A"),(80,"B"),(70,"C"),(60,"D")] if score >= threshold), "F")
+        color = GRADE_COLORS.get(grade, "white")
+        if i == 0:
+            change = Text("—", style="dim")
+        else:
+            diff = score - runs[i - 1]["score"]
+            sign = "+" if diff >= 0 else ""
+            change = Text(f"{sign}{diff}", style="green" if diff > 0 else ("red" if diff < 0 else "dim"))
+        table.add_row(ts, str(score), Text(grade, style=f"bold {color}"), change)
+
+    console.print(table)
+
+
 def _render_org(results: list[tuple[RepoRef, int, str]]) -> None:
     table = Table(show_header=True, header_style="bold", title="Org Health Report")
     table.add_column("Repo")
@@ -157,9 +185,10 @@ def _render_org(results: list[tuple[RepoRef, int, str]]) -> None:
 @click.option("--org", default=None, metavar="ORG", help="Scan all public repos in a GitHub org.")
 @click.option("--fix", "show_fix", is_flag=True, help="Print a checklist of improvements.")
 @click.option("--md", "as_markdown", is_flag=True, help="Output a markdown report.")
+@click.option("--history", "show_history", is_flag=True, help="Show score trend from past runs.")
 @click.option("--limit", type=int, default=20, show_default=True, help="Max repos to scan with --org.")
 @click.version_option()
-def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_markdown, limit):
+def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_markdown, show_history, limit):
     """Scan a GitHub REPO (owner/repo or URL) and print a health report card.
 
     \b
@@ -206,6 +235,10 @@ def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_ma
     except ValueError as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
         sys.exit(1)
+
+    if show_history:
+        _render_history(ref.full_name)
+        return
 
     try:
         with console.status(f"[bold blue]Scanning {ref.full_name}..."):

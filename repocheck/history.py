@@ -28,6 +28,10 @@ def get_last_run(repo: str) -> Optional[dict]:
     return runs[-1] if runs else None
 
 
+def get_history(repo: str) -> list[dict]:
+    return _load().get(repo, [])
+
+
 def save_run(repo: str, score: int, checks: list[dict]) -> None:
     data = _load()
     runs = data.setdefault(repo, [])

@@ -1,6 +1,7 @@
 # repocheck
 
 [![PyPI](https://img.shields.io/pypi/v/repocheck-cli)](https://pypi.org/project/repocheck-cli/)
+[![CI](https://github.com/Ahmed0754/repocheck/actions/workflows/ci.yml/badge.svg)](https://github.com/Ahmed0754/repocheck/actions/workflows/ci.yml)
 
 Scan any public GitHub repo and get an instant engineering health report card — README quality, CI/CD, test presence, dependency hygiene, license, commit activity, and issue hygiene, scored A–F.
 
