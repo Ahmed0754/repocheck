@@ -1,0 +1,36 @@
+name: 'repocheck'
+description: 'Scan a GitHub repo and get an engineering health report card'
+branding:
+  icon: 'activity'
+  color: 'blue'
+
+inputs:
+  repo:
+    description: 'Repository to scan (owner/repo). Defaults to the current repo.'
+    required: false
+    default: ${{ github.repository }}
+  min-score:
+    description: 'Fail the action if the overall score is below this value (0-100).'
+    required: false
+    default: ''
+  token:
+    description: 'GitHub token for API access.'
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install repocheck
+      run: pip install repocheck-cli
+      shell: bash
+    - name: Run repocheck
+      run: |
+        ARGS="${{ inputs.repo }}"
+        if [ -n "${{ inputs.min-score }}" ]; then
+          ARGS="$ARGS --min-score ${{ inputs.min-score }}"
+        fi
+        repocheck $ARGS
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
