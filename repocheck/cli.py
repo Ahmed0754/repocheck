@@ -132,11 +132,26 @@ def _render_compare(report_a, report_b) -> None:
     console.print(table)
 
 
+_SPARK = "▁▂▃▄▅▆▇█"
+
+
+def _sparkline(scores: list[int]) -> str:
+    if not scores:
+        return ""
+    lo, hi = min(scores), max(scores)
+    span = hi - lo or 1
+    return "".join(_SPARK[round((s - lo) / span * (len(_SPARK) - 1))] for s in scores)
+
+
 def _render_history(repo: str) -> None:
     runs = get_history(repo)
     if not runs:
         console.print(f"[dim]No history found for {repo}. Run a scan first.[/dim]")
         return
+
+    scores = [r["score"] for r in runs]
+    spark = _sparkline(scores)
+    console.print(f"\n[bold]Trend[/bold]  {spark}  [dim]{scores[0]} → {scores[-1]}[/dim]\n")
 
     table = Table(show_header=True, header_style="bold", title=f"Score history: {repo}")
     table.add_column("Date")
