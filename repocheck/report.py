@@ -74,9 +74,20 @@ class Report:
         return suggestions
 
 
-def run_report(client: GitHubClient, ref: RepoRef) -> Report:
+def run_report(client: GitHubClient, ref: RepoRef, config: dict | None = None) -> Report:
+    config = config or {}
+    skip = {s.lower() for s in config.get("skip", [])}
+    custom_weights = {k.lower(): v for k, v in config.get("weights", {}).items()}
+
     repo_meta = client.repo(ref)
-    results = [check_fn(client, ref) for check_fn in CHECKS]
+    results = []
+    for check_fn in CHECKS:
+        result = check_fn(client, ref)
+        if result.name.lower() in skip:
+            continue
+        if result.name.lower() in custom_weights:
+            result.weight = custom_weights[result.name.lower()]
+        results.append(result)
 
     total_weight = sum(r.weight for r in results)
     weighted_sum = sum(r.score * r.weight for r in results)
