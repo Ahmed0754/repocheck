@@ -12,6 +12,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from .config import load_config
 from .github_client import GitHubClient, GitHubError, RepoRef, parse_repo_arg
 from .history import get_history, get_last_run, save_run
 from .report import run_report
@@ -203,9 +204,10 @@ def _render_org(results: list[tuple[RepoRef, int, str]]) -> None:
 @click.option("--md", "as_markdown", is_flag=True, help="Output a markdown report.")
 @click.option("--history", "show_history", is_flag=True, help="Show score trend from past runs.")
 @click.option("--watch", type=int, default=None, metavar="SECONDS", help="Re-scan every N seconds until Ctrl+C.")
+@click.option("--config", "config_path", default=None, metavar="FILE", help="Path to config file (default: .repocheckrc).")
 @click.option("--limit", type=int, default=20, show_default=True, help="Max repos to scan with --org.")
 @click.version_option()
-def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_markdown, show_history, watch, limit):
+def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_markdown, show_history, watch, config_path, limit):
     """Scan a GitHub REPO (owner/repo or URL) and print a health report card.
 
     \b
@@ -221,6 +223,7 @@ def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_ma
         raise click.UsageError("Provide a REPO argument or use --org ORG.")
 
     client = GitHubClient(token=token)
+    config = load_config(config_path)
 
     # --org mode: scan all public repos in an org
     if org:
@@ -237,7 +240,7 @@ def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_ma
             ref = RepoRef(r["owner"]["login"], r["name"])
             try:
                 with console.status(f"Scanning {ref.full_name}..."):
-                    report = run_report(client, ref)
+                    report = run_report(client, ref, config)
                 results.append((ref, report.overall_score, report.overall_grade))
             except GitHubError:
                 pass
@@ -259,7 +262,7 @@ def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_ma
 
     try:
         with console.status(f"[bold blue]Scanning {ref.full_name}..."):
-            report = run_report(client, ref)
+            report = run_report(client, ref, config)
     except GitHubError as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
         sys.exit(1)
@@ -301,7 +304,7 @@ def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_ma
             time.sleep(watch)
             console.clear()
             with console.status(f"[bold blue]Scanning {ref.full_name}..."):
-                report = run_report(client, ref)
+                report = run_report(client, ref, config)
     except KeyboardInterrupt:
         console.print("\n[dim]Watch stopped.[/dim]")
 
