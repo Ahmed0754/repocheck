@@ -130,6 +130,18 @@ class GitHubClient:
         except (GitHubError, requests.exceptions.HTTPError):
             return None
 
+    def rulesets(self, ref: RepoRef) -> list[dict[str, Any]]:
+        try:
+            return self._get(f"/repos/{ref.full_name}/rulesets").json()
+        except (GitHubError, requests.exceptions.HTTPError):
+            return []
+
+    def ruleset(self, ref: RepoRef, ruleset_id: int) -> Optional[dict[str, Any]]:
+        try:
+            return self._get(f"/repos/{ref.full_name}/rulesets/{ruleset_id}").json()
+        except (GitHubError, requests.exceptions.HTTPError):
+            return None
+
     def org_repos(self, org: str, per_page: int = 100) -> list[dict[str, Any]]:
         try:
             return self._get(

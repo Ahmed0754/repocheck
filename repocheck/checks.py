@@ -359,31 +359,64 @@ def check_docker(client: GitHubClient, ref: RepoRef) -> CheckResult:
 
 
 def check_branch_protection(client: GitHubClient, ref: RepoRef) -> CheckResult:
+    # Try old-style branch protection first
     protection = client.branch_protection(ref, "main") or client.branch_protection(ref, "master")
 
-    if protection is None:
+    if protection is not None:
+        details = []
+        score = 40
+
+        required_reviews = protection.get("required_pull_request_reviews")
+        if required_reviews:
+            count = required_reviews.get("required_approving_review_count", 1)
+            score += 30
+            details.append(f"PR reviews required ({count} approver(s)).")
+        else:
+            details.append("No required PR reviews.")
+
+        if protection.get("required_status_checks"):
+            score += 20
+            details.append("Required status checks configured.")
+        else:
+            details.append("No required status checks.")
+
+        if protection.get("enforce_admins", {}).get("enabled"):
+            score += 10
+            details.append("Protection enforced for admins too.")
+
+        return _result("Branch Protection", score, details, weight=0.75)
+
+    # Fall back to newer rulesets API (GitHub's current UI uses rulesets)
+    all_rulesets = client.rulesets(ref)
+    active = [r for r in all_rulesets if isinstance(r, dict) and r.get("enforcement") == "active"]
+
+    if not active:
         return _result("Branch Protection", 0, ["No branch protection on main/master — anyone can push directly."], weight=0.75)
 
-    details = []
+    details = [f"Branch ruleset active: '{active[0].get('name', 'unnamed')}'."]
     score = 40
 
-    required_reviews = protection.get("required_pull_request_reviews")
-    if required_reviews:
-        count = required_reviews.get("required_approving_review_count", 1)
-        score += 30
-        details.append(f"PR reviews required ({count} approver(s)).")
-    else:
-        details.append("No required PR reviews.")
+    full = client.ruleset(ref, active[0]["id"])
+    if full:
+        rule_types = {r["type"] for r in full.get("rules", [])}
 
-    if protection.get("required_status_checks"):
-        score += 20
-        details.append("Required status checks configured.")
-    else:
-        details.append("No required status checks.")
+        if "pull_request" in rule_types:
+            pr_rule = next((r for r in full["rules"] if r["type"] == "pull_request"), {})
+            count = pr_rule.get("parameters", {}).get("required_approving_review_count", 1)
+            score += 30
+            details.append(f"PR reviews required ({count} approver(s)).")
+        else:
+            details.append("No required PR reviews.")
 
-    if protection.get("enforce_admins", {}).get("enabled"):
-        score += 10
-        details.append("Protection enforced for admins too.")
+        if "required_status_checks" in rule_types:
+            score += 20
+            details.append("Required status checks configured.")
+        else:
+            details.append("No required status checks.")
+
+        if "deletion" in rule_types:
+            score += 10
+            details.append("Branch deletion restricted.")
 
     return _result("Branch Protection", score, details, weight=0.75)
 
