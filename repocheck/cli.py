@@ -204,11 +204,12 @@ def _render_org(results: list[tuple[RepoRef, int, str]]) -> None:
 @click.option("--md", "as_markdown", is_flag=True, help="Output a markdown report.")
 @click.option("--history", "show_history", is_flag=True, help="Show score trend from past runs.")
 @click.option("--since", type=int, default=None, metavar="DAYS", help="Filter --history to last N days.")
+@click.option("--batch", "batch_file", default=None, metavar="FILE", help="Scan repos listed one per line in FILE.")
 @click.option("--watch", type=int, default=None, metavar="SECONDS", help="Re-scan every N seconds until Ctrl+C.")
 @click.option("--config", "config_path", default=None, metavar="FILE", help="Path to config file (default: .repocheckrc).")
 @click.option("--limit", type=int, default=20, show_default=True, help="Max repos to scan with --org.")
 @click.version_option()
-def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_markdown, show_history, since, watch, config_path, limit):
+def main(repo, token, as_json, verbose, min_score, compare, org, batch_file, show_fix, as_markdown, show_history, since, watch, config_path, limit):
     """Scan a GitHub REPO (owner/repo or URL) and print a health report card.
 
     \b
@@ -220,8 +221,8 @@ def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_ma
       repocheck pallets/flask --min-score 80
       repocheck --org pallets
     """
-    if not repo and not org:
-        raise click.UsageError("Provide a REPO argument or use --org ORG.")
+    if not repo and not org and not batch_file:
+        raise click.UsageError("Provide a REPO argument, --org ORG, or --batch FILE.")
 
     client = GitHubClient(token=token)
     config = load_config(config_path)
@@ -245,6 +246,28 @@ def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_ma
                 results.append((ref, report.overall_score, report.overall_grade))
             except GitHubError:
                 pass
+
+        results.sort(key=lambda x: x[1], reverse=True)
+        _render_org(results)
+        return
+
+    # --batch mode: scan repos from a file
+    if batch_file:
+        try:
+            lines = [l.strip() for l in open(batch_file) if l.strip() and not l.startswith("#")]
+        except OSError as e:
+            console.print(f"[bold red]Error:[/bold red] {e}")
+            sys.exit(1)
+
+        results = []
+        for line in lines:
+            try:
+                ref = parse_repo_arg(line)
+                with console.status(f"Scanning {ref.full_name}..."):
+                    report = run_report(client, ref, config)
+                results.append((ref, report.overall_score, report.overall_grade))
+            except (ValueError, GitHubError):
+                console.print(f"[dim]Skipping {line} (error)[/dim]")
 
         results.sort(key=lambda x: x[1], reverse=True)
         _render_org(results)
