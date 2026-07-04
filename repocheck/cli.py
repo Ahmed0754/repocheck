@@ -12,6 +12,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from .autofix import apply_fixes
+from .dashboard import serve as serve_dashboard
 from .config import load_config
 from .github_client import GitHubClient, GitHubError, RepoRef, parse_repo_arg
 from .history import get_history, get_last_run, save_run
@@ -145,8 +147,21 @@ def _sparkline(scores: list[int]) -> str:
     return "".join(_SPARK[round((s - lo) / span * (len(_SPARK) - 1))] for s in scores)
 
 
-def _render_history(repo: str) -> None:
-    runs = get_history(repo)
+def _post_slack(webhook_url: str, report) -> None:
+    import urllib.request
+    color = {"A": "#2ecc71", "B": "#3498db", "C": "#f39c12", "D": "#e67e22", "F": "#e74c3c"}.get(report.overall_grade, "#95a5a6")
+    rows = "\n".join(f"• {c.name}: {c.score}/100 ({c.grade})" for c in report.checks)
+    payload = json.dumps({"attachments": [{"color": color, "title": f"repocheck: {report.repo.full_name}", "text": f"*{report.overall_score}/100 ({report.overall_grade})*\n\n{rows}"}]}).encode()
+    try:
+        req = urllib.request.Request(webhook_url, data=payload, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10)
+        console.print("[dim]Slack notification sent.[/dim]")
+    except Exception as e:
+        console.print(f"[yellow]Slack notification failed: {e}[/yellow]")
+
+
+def _render_history(repo: str, since_days: int | None = None) -> None:
+    runs = get_history(repo, since_days=since_days)
     if not runs:
         console.print(f"[dim]No history found for {repo}. Run a scan first.[/dim]")
         return
@@ -201,13 +216,19 @@ def _render_org(results: list[tuple[RepoRef, int, str]]) -> None:
 @click.option("--compare", default=None, metavar="REPO2", help="Compare against a second repo.")
 @click.option("--org", default=None, metavar="ORG", help="Scan all public repos in a GitHub org.")
 @click.option("--fix", "show_fix", is_flag=True, help="Print a checklist of improvements.")
+@click.option("--auto-fix", "auto_fix", is_flag=True, help="Create missing files locally (SECURITY.md, CI workflow, etc).")
 @click.option("--md", "as_markdown", is_flag=True, help="Output a markdown report.")
 @click.option("--history", "show_history", is_flag=True, help="Show score trend from past runs.")
+@click.option("--since", type=int, default=None, metavar="DAYS", help="Filter --history to last N days.")
+@click.option("--batch", "batch_file", default=None, metavar="FILE", help="Scan repos listed one per line in FILE.")
 @click.option("--watch", type=int, default=None, metavar="SECONDS", help="Re-scan every N seconds until Ctrl+C.")
 @click.option("--config", "config_path", default=None, metavar="FILE", help="Path to config file (default: .repocheckrc).")
+@click.option("--serve", "serve", is_flag=True, help="Open a local browser dashboard instead of terminal output.")
+@click.option("--port", type=int, default=5678, show_default=True, help="Port for --serve dashboard.")
+@click.option("--slack-webhook", default=None, metavar="URL", help="Post report summary to a Slack webhook URL.")
 @click.option("--limit", type=int, default=20, show_default=True, help="Max repos to scan with --org.")
 @click.version_option()
-def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_markdown, show_history, watch, config_path, limit):
+def main(repo, token, as_json, verbose, min_score, compare, org, batch_file, show_fix, auto_fix, as_markdown, show_history, since, watch, serve, port, slack_webhook, config_path, limit):
     """Scan a GitHub REPO (owner/repo or URL) and print a health report card.
 
     \b
@@ -219,8 +240,8 @@ def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_ma
       repocheck pallets/flask --min-score 80
       repocheck --org pallets
     """
-    if not repo and not org:
-        raise click.UsageError("Provide a REPO argument or use --org ORG.")
+    if not repo and not org and not batch_file:
+        raise click.UsageError("Provide a REPO argument, --org ORG, or --batch FILE.")
 
     client = GitHubClient(token=token)
     config = load_config(config_path)
@@ -249,6 +270,28 @@ def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_ma
         _render_org(results)
         return
 
+    # --batch mode: scan repos from a file
+    if batch_file:
+        try:
+            lines = [l.strip() for l in open(batch_file) if l.strip() and not l.startswith("#")]
+        except OSError as e:
+            console.print(f"[bold red]Error:[/bold red] {e}")
+            sys.exit(1)
+
+        results = []
+        for line in lines:
+            try:
+                ref = parse_repo_arg(line)
+                with console.status(f"Scanning {ref.full_name}..."):
+                    report = run_report(client, ref, config)
+                results.append((ref, report.overall_score, report.overall_grade))
+            except (ValueError, GitHubError):
+                console.print(f"[dim]Skipping {line} (error)[/dim]")
+
+        results.sort(key=lambda x: x[1], reverse=True)
+        _render_org(results)
+        return
+
     # Normal single-repo mode
     try:
         ref = parse_repo_arg(repo)
@@ -257,7 +300,7 @@ def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_ma
         sys.exit(1)
 
     if show_history:
-        _render_history(ref.full_name)
+        _render_history(ref.full_name, since_days=since)
         return
 
     try:
@@ -284,7 +327,10 @@ def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_ma
             last_run = get_last_run(ref.full_name)
             save_run(ref.full_name, report.overall_score, [{"name": c.name, "score": c.score} for c in report.checks])
 
-            if as_json:
+            if serve:
+                serve_dashboard(report.to_dict(), port=port)
+                return
+            elif as_json:
                 print(json.dumps(report.to_dict(), indent=2))
             elif as_markdown:
                 print(report.to_markdown())
@@ -292,6 +338,17 @@ def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_ma
                 _render(report, verbose=verbose, last_run=last_run)
                 if show_fix:
                     _render_fix(report)
+                if slack_webhook:
+                    _post_slack(slack_webhook, report)
+                if auto_fix:
+                    created = apply_fixes(report.checks)
+                    if created:
+                        console.print("\n[green bold]Auto-fix created:[/green bold]")
+                        for f in created:
+                            console.print(f"  [green]✓[/green] {f}")
+                        console.print("\n[dim]Review the files, then: git add . && git commit -m 'Add missing project files'[/dim]")
+                    else:
+                        console.print("\n[green]Nothing to auto-fix — no missing files detected.[/green]")
 
             if min_score is not None and report.overall_score < min_score:
                 console.print(f"\n[red bold]Score {report.overall_score} is below --min-score {min_score}. Exiting with code 1.[/red bold]")

@@ -28,8 +28,12 @@ def get_last_run(repo: str) -> Optional[dict]:
     return runs[-1] if runs else None
 
 
-def get_history(repo: str) -> list[dict]:
-    return _load().get(repo, [])
+def get_history(repo: str, since_days: int | None = None) -> list[dict]:
+    runs = _load().get(repo, [])
+    if since_days is not None:
+        cutoff = datetime.now(timezone.utc).timestamp() - since_days * 86400
+        runs = [r for r in runs if datetime.fromisoformat(r["timestamp"]).timestamp() >= cutoff]
+    return runs
 
 
 def save_run(repo: str, score: int, checks: list[dict]) -> None:
