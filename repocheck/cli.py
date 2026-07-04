@@ -13,6 +13,7 @@ from rich.table import Table
 from rich.text import Text
 
 from .autofix import apply_fixes
+from .dashboard import serve as serve_dashboard
 from .config import load_config
 from .github_client import GitHubClient, GitHubError, RepoRef, parse_repo_arg
 from .history import get_history, get_last_run, save_run
@@ -222,10 +223,12 @@ def _render_org(results: list[tuple[RepoRef, int, str]]) -> None:
 @click.option("--batch", "batch_file", default=None, metavar="FILE", help="Scan repos listed one per line in FILE.")
 @click.option("--watch", type=int, default=None, metavar="SECONDS", help="Re-scan every N seconds until Ctrl+C.")
 @click.option("--config", "config_path", default=None, metavar="FILE", help="Path to config file (default: .repocheckrc).")
+@click.option("--serve", "serve", is_flag=True, help="Open a local browser dashboard instead of terminal output.")
+@click.option("--port", type=int, default=5678, show_default=True, help="Port for --serve dashboard.")
 @click.option("--slack-webhook", default=None, metavar="URL", help="Post report summary to a Slack webhook URL.")
 @click.option("--limit", type=int, default=20, show_default=True, help="Max repos to scan with --org.")
 @click.version_option()
-def main(repo, token, as_json, verbose, min_score, compare, org, batch_file, show_fix, auto_fix, as_markdown, show_history, since, watch, slack_webhook, config_path, limit):
+def main(repo, token, as_json, verbose, min_score, compare, org, batch_file, show_fix, auto_fix, as_markdown, show_history, since, watch, serve, port, slack_webhook, config_path, limit):
     """Scan a GitHub REPO (owner/repo or URL) and print a health report card.
 
     \b
@@ -324,7 +327,10 @@ def main(repo, token, as_json, verbose, min_score, compare, org, batch_file, sho
             last_run = get_last_run(ref.full_name)
             save_run(ref.full_name, report.overall_score, [{"name": c.name, "score": c.score} for c in report.checks])
 
-            if as_json:
+            if serve:
+                serve_dashboard(report.to_dict(), port=port)
+                return
+            elif as_json:
                 print(json.dumps(report.to_dict(), indent=2))
             elif as_markdown:
                 print(report.to_markdown())
