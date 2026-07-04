@@ -35,6 +35,7 @@ class Report:
                     "name": c.name,
                     "score": c.score,
                     "grade": c.grade,
+                    "weight": c.weight,
                     "details": c.details,
                 }
                 for c in self.checks
