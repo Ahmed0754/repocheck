@@ -146,6 +146,19 @@ def _sparkline(scores: list[int]) -> str:
     return "".join(_SPARK[round((s - lo) / span * (len(_SPARK) - 1))] for s in scores)
 
 
+def _post_slack(webhook_url: str, report) -> None:
+    import urllib.request
+    color = {"A": "#2ecc71", "B": "#3498db", "C": "#f39c12", "D": "#e67e22", "F": "#e74c3c"}.get(report.overall_grade, "#95a5a6")
+    rows = "\n".join(f"• {c.name}: {c.score}/100 ({c.grade})" for c in report.checks)
+    payload = json.dumps({"attachments": [{"color": color, "title": f"repocheck: {report.repo.full_name}", "text": f"*{report.overall_score}/100 ({report.overall_grade})*\n\n{rows}"}]}).encode()
+    try:
+        req = urllib.request.Request(webhook_url, data=payload, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10)
+        console.print("[dim]Slack notification sent.[/dim]")
+    except Exception as e:
+        console.print(f"[yellow]Slack notification failed: {e}[/yellow]")
+
+
 def _render_history(repo: str, since_days: int | None = None) -> None:
     runs = get_history(repo, since_days=since_days)
     if not runs:
@@ -209,9 +222,10 @@ def _render_org(results: list[tuple[RepoRef, int, str]]) -> None:
 @click.option("--batch", "batch_file", default=None, metavar="FILE", help="Scan repos listed one per line in FILE.")
 @click.option("--watch", type=int, default=None, metavar="SECONDS", help="Re-scan every N seconds until Ctrl+C.")
 @click.option("--config", "config_path", default=None, metavar="FILE", help="Path to config file (default: .repocheckrc).")
+@click.option("--slack-webhook", default=None, metavar="URL", help="Post report summary to a Slack webhook URL.")
 @click.option("--limit", type=int, default=20, show_default=True, help="Max repos to scan with --org.")
 @click.version_option()
-def main(repo, token, as_json, verbose, min_score, compare, org, batch_file, show_fix, auto_fix, as_markdown, show_history, since, watch, config_path, limit):
+def main(repo, token, as_json, verbose, min_score, compare, org, batch_file, show_fix, auto_fix, as_markdown, show_history, since, watch, slack_webhook, config_path, limit):
     """Scan a GitHub REPO (owner/repo or URL) and print a health report card.
 
     \b
@@ -318,6 +332,8 @@ def main(repo, token, as_json, verbose, min_score, compare, org, batch_file, sho
                 _render(report, verbose=verbose, last_run=last_run)
                 if show_fix:
                     _render_fix(report)
+                if slack_webhook:
+                    _post_slack(slack_webhook, report)
                 if auto_fix:
                     created = apply_fixes(report.checks)
                     if created:
