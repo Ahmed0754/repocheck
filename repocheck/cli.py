@@ -145,8 +145,8 @@ def _sparkline(scores: list[int]) -> str:
     return "".join(_SPARK[round((s - lo) / span * (len(_SPARK) - 1))] for s in scores)
 
 
-def _render_history(repo: str) -> None:
-    runs = get_history(repo)
+def _render_history(repo: str, since_days: int | None = None) -> None:
+    runs = get_history(repo, since_days=since_days)
     if not runs:
         console.print(f"[dim]No history found for {repo}. Run a scan first.[/dim]")
         return
@@ -203,11 +203,12 @@ def _render_org(results: list[tuple[RepoRef, int, str]]) -> None:
 @click.option("--fix", "show_fix", is_flag=True, help="Print a checklist of improvements.")
 @click.option("--md", "as_markdown", is_flag=True, help="Output a markdown report.")
 @click.option("--history", "show_history", is_flag=True, help="Show score trend from past runs.")
+@click.option("--since", type=int, default=None, metavar="DAYS", help="Filter --history to last N days.")
 @click.option("--watch", type=int, default=None, metavar="SECONDS", help="Re-scan every N seconds until Ctrl+C.")
 @click.option("--config", "config_path", default=None, metavar="FILE", help="Path to config file (default: .repocheckrc).")
 @click.option("--limit", type=int, default=20, show_default=True, help="Max repos to scan with --org.")
 @click.version_option()
-def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_markdown, show_history, watch, config_path, limit):
+def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_markdown, show_history, since, watch, config_path, limit):
     """Scan a GitHub REPO (owner/repo or URL) and print a health report card.
 
     \b
@@ -257,7 +258,7 @@ def main(repo, token, as_json, verbose, min_score, compare, org, show_fix, as_ma
         sys.exit(1)
 
     if show_history:
-        _render_history(ref.full_name)
+        _render_history(ref.full_name, since_days=since)
         return
 
     try:
