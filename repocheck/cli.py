@@ -328,7 +328,7 @@ def main(repo, token, as_json, verbose, min_score, compare, org, batch_file, sho
             save_run(ref.full_name, report.overall_score, [{"name": c.name, "score": c.score} for c in report.checks])
 
             if serve:
-                serve_dashboard(report.to_dict(), port=port)
+                serve_dashboard(report.to_dict(), history=get_history(ref.full_name), port=port)
                 return
             elif as_json:
                 print(json.dumps(report.to_dict(), indent=2))
