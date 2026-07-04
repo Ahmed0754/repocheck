@@ -12,6 +12,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from .autofix import apply_fixes
 from .config import load_config
 from .github_client import GitHubClient, GitHubError, RepoRef, parse_repo_arg
 from .history import get_history, get_last_run, save_run
@@ -201,6 +202,7 @@ def _render_org(results: list[tuple[RepoRef, int, str]]) -> None:
 @click.option("--compare", default=None, metavar="REPO2", help="Compare against a second repo.")
 @click.option("--org", default=None, metavar="ORG", help="Scan all public repos in a GitHub org.")
 @click.option("--fix", "show_fix", is_flag=True, help="Print a checklist of improvements.")
+@click.option("--auto-fix", "auto_fix", is_flag=True, help="Create missing files locally (SECURITY.md, CI workflow, etc).")
 @click.option("--md", "as_markdown", is_flag=True, help="Output a markdown report.")
 @click.option("--history", "show_history", is_flag=True, help="Show score trend from past runs.")
 @click.option("--since", type=int, default=None, metavar="DAYS", help="Filter --history to last N days.")
@@ -209,7 +211,7 @@ def _render_org(results: list[tuple[RepoRef, int, str]]) -> None:
 @click.option("--config", "config_path", default=None, metavar="FILE", help="Path to config file (default: .repocheckrc).")
 @click.option("--limit", type=int, default=20, show_default=True, help="Max repos to scan with --org.")
 @click.version_option()
-def main(repo, token, as_json, verbose, min_score, compare, org, batch_file, show_fix, as_markdown, show_history, since, watch, config_path, limit):
+def main(repo, token, as_json, verbose, min_score, compare, org, batch_file, show_fix, auto_fix, as_markdown, show_history, since, watch, config_path, limit):
     """Scan a GitHub REPO (owner/repo or URL) and print a health report card.
 
     \b
@@ -316,6 +318,15 @@ def main(repo, token, as_json, verbose, min_score, compare, org, batch_file, sho
                 _render(report, verbose=verbose, last_run=last_run)
                 if show_fix:
                     _render_fix(report)
+                if auto_fix:
+                    created = apply_fixes(report.checks)
+                    if created:
+                        console.print("\n[green bold]Auto-fix created:[/green bold]")
+                        for f in created:
+                            console.print(f"  [green]✓[/green] {f}")
+                        console.print("\n[dim]Review the files, then: git add . && git commit -m 'Add missing project files'[/dim]")
+                    else:
+                        console.print("\n[green]Nothing to auto-fix — no missing files detected.[/green]")
 
             if min_score is not None and report.overall_score < min_score:
                 console.print(f"\n[red bold]Score {report.overall_score} is below --min-score {min_score}. Exiting with code 1.[/red bold]")
