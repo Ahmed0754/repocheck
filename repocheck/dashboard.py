@@ -167,9 +167,9 @@ function renderReport(data) {
   renderHistoryChart();
 }
 
-fetch('/data').then(r => r.json()).then(renderReport);
+(window.__RC_DATA__ ? Promise.resolve(window.__RC_DATA__) : fetch('/data').then(r => r.json())).then(renderReport);
 
-fetch('/history').then(r => r.json()).then(runs => {
+(window.__RC_HISTORY__ ? Promise.resolve(window.__RC_HISTORY__) : fetch('/history').then(r => r.json())).then(runs => {
   cachedHistory = runs;
   renderHistoryChart();
 });
@@ -217,6 +217,17 @@ class _Handler(BaseHTTPRequestHandler):
 
     def log_message(self, *args):
         pass  # silence request logs
+
+
+def render_static(report_dict: dict, history: list[dict] | None = None) -> str:
+    """Return a standalone HTML string with data embedded — no server required."""
+    inject = (
+        "<script>\n"
+        f"window.__RC_DATA__={json.dumps(report_dict)};\n"
+        f"window.__RC_HISTORY__={json.dumps(history or [])};\n"
+        "</script>\n"
+    )
+    return HTML_TEMPLATE.replace("</head>", inject + "</head>", 1)
 
 
 def serve(report_dict: dict, history: list[dict] | None = None, port: int = 5678) -> None:
