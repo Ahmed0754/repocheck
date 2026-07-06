@@ -421,6 +421,82 @@ def check_branch_protection(client: GitHubClient, ref: RepoRef) -> CheckResult:
     return _result("Branch Protection", score, details, weight=0.75)
 
 
+def check_changelog(client: GitHubClient, ref: RepoRef) -> CheckResult:
+    files = client.root_files(ref)
+    changelog = next((f for f in files if f.lower().startswith("changelog")), None)
+
+    if not changelog:
+        return _result("Changelog", 0, ["No CHANGELOG.md — consider documenting changes between versions."], weight=0.5)
+
+    text = client.file_text(ref, changelog) or ""
+    details = [f"{changelog} found ({len(text)} chars)."]
+    score = 70
+    if len(text) > 500:
+        score += 30
+        details.append("Substantive changelog (>500 chars).")
+    else:
+        details.append("Short changelog — consider expanding.")
+    return _result("Changelog", score, details, weight=0.5)
+
+
+def check_issue_templates(client: GitHubClient, ref: RepoRef) -> CheckResult:
+    github_contents = client.contents(ref, ".github") or []
+    if not isinstance(github_contents, list):
+        github_contents = []
+    github_names = [item["name"].lower() for item in github_contents]
+    root_files = [f.lower() for f in client.root_files(ref)]
+
+    details = []
+    score = 0
+
+    has_issue_template = "issue_template" in github_names or "issue_template.md" in github_names
+    if has_issue_template:
+        score += 50
+        details.append("Issue template(s) configured in .github/.")
+    else:
+        details.append("No issue templates — consider adding .github/ISSUE_TEMPLATE/.")
+
+    has_pr_template = "pull_request_template.md" in github_names or "pull_request_template.md" in root_files
+    if has_pr_template:
+        score += 50
+        details.append("Pull request template found.")
+    else:
+        details.append("No pull request template — consider adding .github/pull_request_template.md.")
+
+    return _result("Issue/PR Templates", score, details, weight=0.5)
+
+
+def check_coverage(client: GitHubClient, ref: RepoRef) -> CheckResult:
+    files = [f.lower() for f in client.root_files(ref)]
+    details = []
+    score = 0
+
+    coverage_files = [".coveragerc", "codecov.yml", "codecov.yaml", ".codecov.yml", ".codecov.yaml"]
+    found_config = next((f for f in coverage_files if f in files), None)
+    pyproject = client.file_text(ref, "pyproject.toml") or ""
+    setup_cfg = client.file_text(ref, "setup.cfg") or ""
+
+    if found_config:
+        score += 50
+        details.append(f"Coverage config found: {found_config}.")
+    elif "[tool.coverage" in pyproject or "[coverage:" in setup_cfg:
+        score += 50
+        details.append("Coverage configured in pyproject.toml / setup.cfg.")
+    else:
+        details.append("No coverage configuration — consider adding codecov.yml or [tool.coverage] in pyproject.toml.")
+
+    readme_name = next((f for f in client.root_files(ref) if f.lower().startswith("readme")), None)
+    if readme_name:
+        readme = client.file_text(ref, readme_name) or ""
+        if "codecov" in readme.lower() or "coveralls" in readme.lower():
+            score += 50
+            details.append("Coverage badge in README.")
+        else:
+            details.append("No coverage badge in README — consider adding one.")
+
+    return _result("Code Coverage", score, details, weight=0.5)
+
+
 CHECKS: list[Callable[[GitHubClient, RepoRef], CheckResult]] = [
     check_readme,
     check_ci,
@@ -433,4 +509,7 @@ CHECKS: list[Callable[[GitHubClient, RepoRef], CheckResult]] = [
     check_contributing,
     check_docker,
     check_branch_protection,
+    check_changelog,
+    check_issue_templates,
+    check_coverage,
 ]

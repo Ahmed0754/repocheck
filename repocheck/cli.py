@@ -207,10 +207,56 @@ def _render_org(results: list[tuple[RepoRef, int, str]]) -> None:
     console.print(f"\n[bold]Org average: {avg}/100[/bold]")
 
 
+def _render_badge(report) -> None:
+    colors = {"A": "brightgreen", "B": "blue", "C": "yellow", "D": "orange", "F": "red"}
+    color = colors.get(report.overall_grade, "lightgrey")
+    label = f"{report.overall_score}%2F100%20{report.overall_grade}"
+    badge_url = f"https://img.shields.io/badge/repocheck-{label}-{color}"
+    badge_md = f"[![repocheck]({badge_url})](https://pypi.org/project/repocheck-cli/)"
+    console.print(f"\n[bold]Badge (paste into your README):[/bold]\n{badge_md}\n")
+
+
+def _render_csv(report) -> None:
+    import csv, io
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(["repo", "overall_score", "overall_grade"] + [c.name for c in report.checks])
+    writer.writerow([report.repo.full_name, report.overall_score, report.overall_grade] + [c.score for c in report.checks])
+    print(out.getvalue(), end="")
+
+
+_REPOCHECKRC_TEMPLATE = """\
+[repocheck]
+# Comma-separated list of checks to skip
+# skip = Docker/Deploy, Code Coverage
+
+# Fail if score drops below this threshold (useful in CI)
+# min_score = 80
+
+[weights]
+# Override check weights (default 1.0; lower = less impact on overall score)
+# Security = 2.0
+# Docker/Deploy = 0
+"""
+
+
+def _do_init() -> None:
+    from pathlib import Path
+    dest = Path(".repocheckrc")
+    if dest.exists():
+        console.print("[yellow].repocheckrc already exists — not overwriting.[/yellow]")
+        return
+    dest.write_text(_REPOCHECKRC_TEMPLATE)
+    console.print("[green]Created .repocheckrc[/green] — edit it to skip checks or override weights.")
+
+
 @click.command()
 @click.argument("repo", required=False, default=None)
 @click.option("--token", envvar="GITHUB_TOKEN", help="GitHub personal access token.")
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON.")
+@click.option("--csv", "as_csv", is_flag=True, help="Output results as CSV.")
+@click.option("--badge", "show_badge", is_flag=True, help="Print a shields.io badge markdown for the README.")
+@click.option("--init", "init_config", is_flag=True, help="Scaffold a .repocheckrc in the current directory.")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed reasoning for every check.")
 @click.option("--min-score", type=int, default=None, help="Exit with code 1 if score is below this threshold.")
 @click.option("--compare", default=None, metavar="REPO2", help="Compare against a second repo.")
@@ -229,7 +275,7 @@ def _render_org(results: list[tuple[RepoRef, int, str]]) -> None:
 @click.option("--slack-webhook", default=None, metavar="URL", help="Post report summary to a Slack webhook URL.")
 @click.option("--limit", type=int, default=20, show_default=True, help="Max repos to scan with --org.")
 @click.version_option()
-def main(repo, token, as_json, verbose, min_score, compare, org, batch_file, show_fix, auto_fix, as_markdown, show_history, since, watch, serve, export_file, port, slack_webhook, config_path, limit):
+def main(repo, token, as_json, as_csv, show_badge, init_config, verbose, min_score, compare, org, batch_file, show_fix, auto_fix, as_markdown, show_history, since, watch, serve, export_file, port, slack_webhook, config_path, limit):
     """Scan a GitHub REPO (owner/repo or URL) and print a health report card.
 
     \b
@@ -241,6 +287,10 @@ def main(repo, token, as_json, verbose, min_score, compare, org, batch_file, sho
       repocheck pallets/flask --min-score 80
       repocheck --org pallets
     """
+    if init_config:
+        _do_init()
+        return
+
     if not repo and not org and not batch_file:
         raise click.UsageError("Provide a REPO argument, --org ORG, or --batch FILE.")
 
@@ -339,12 +389,16 @@ def main(repo, token, as_json, verbose, min_score, compare, org, batch_file, sho
                 return
             elif as_json:
                 print(json.dumps(report.to_dict(), indent=2))
+            elif as_csv:
+                _render_csv(report)
             elif as_markdown:
                 print(report.to_markdown())
             else:
                 _render(report, verbose=verbose, last_run=last_run)
                 if show_fix:
                     _render_fix(report)
+                if show_badge:
+                    _render_badge(report)
                 if slack_webhook:
                     _post_slack(slack_webhook, report)
                 if auto_fix:
