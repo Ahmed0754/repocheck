@@ -6,11 +6,14 @@ import pytest
 from repocheck.checks import (
     check_activity,
     check_branch_protection,
+    check_changelog,
     check_ci,
     check_contributing,
+    check_coverage,
     check_dependencies,
     check_docker,
     check_issue_hygiene,
+    check_issue_templates,
     check_license,
     check_readme,
     check_security,
@@ -326,4 +329,87 @@ def test_branch_protection_full():
     }
     client = make_client(branch_protection=protection)
     result = check_branch_protection(client, REF)
+    assert result.score == 100
+
+
+# ---------------------------------------------------------------------------
+# Changelog
+# ---------------------------------------------------------------------------
+
+def test_changelog_missing():
+    client = make_client(root_files=[])
+    result = check_changelog(client, REF)
+    assert result.score == 0
+    assert result.grade == "F"
+
+
+def test_changelog_short():
+    client = make_client(root_files=["CHANGELOG.md"], file_text="## v1.0\n- initial release")
+    result = check_changelog(client, REF)
+    assert result.score == 70
+
+
+def test_changelog_full():
+    client = make_client(root_files=["CHANGELOG.md"], file_text="## v1.0\n" + "x" * 600)
+    result = check_changelog(client, REF)
+    assert result.score == 100
+
+
+# ---------------------------------------------------------------------------
+# Issue/PR Templates
+# ---------------------------------------------------------------------------
+
+def test_issue_templates_none():
+    client = make_client(contents=[], root_files=[])
+    result = check_issue_templates(client, REF)
+    assert result.score == 0
+
+
+def test_issue_templates_both():
+    client = make_client(
+        contents=[{"name": "ISSUE_TEMPLATE"}, {"name": "pull_request_template.md"}],
+        root_files=[],
+    )
+    result = check_issue_templates(client, REF)
+    assert result.score == 100
+
+
+def test_issue_templates_pr_only():
+    client = make_client(
+        contents=[{"name": "pull_request_template.md"}],
+        root_files=[],
+    )
+    result = check_issue_templates(client, REF)
+    assert result.score == 50
+
+
+# ---------------------------------------------------------------------------
+# Code Coverage
+# ---------------------------------------------------------------------------
+
+def test_coverage_nothing():
+    client = make_client(root_files=[], file_text=None)
+    result = check_coverage(client, REF)
+    assert result.score == 0
+
+
+def test_coverage_config_file():
+    client = make_client(root_files=["codecov.yml", "README.md"], file_text="")
+    result = check_coverage(client, REF)
+    assert result.score >= 50
+
+
+def test_coverage_pyproject_and_badge():
+    readme = "# Widget\n[![codecov](https://codecov.io/gh/acme/widget/badge.svg)](https://codecov.io/gh/acme/widget)"
+
+    def file_text_side_effect(ref, path):
+        if path == "pyproject.toml":
+            return "[tool.coverage.run]\nsource = [\"widget\"]"
+        if path.lower().startswith("readme"):
+            return readme
+        return None
+
+    client = make_client(root_files=["README.md", "pyproject.toml"])
+    client.file_text.side_effect = file_text_side_effect
+    result = check_coverage(client, REF)
     assert result.score == 100
